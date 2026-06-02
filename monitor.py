@@ -1,9 +1,9 @@
 import os
 import requests
-import json
+from bs4 import BeautifulSoup
 
 # ==================== 配置区 ====================
-# 【重要】：监控时请确保这里的 URL 格式包含完整的 item_商品名_商品ID
+# 目前放的是你用来测试的有货商品链接
 URLS = [
     "https://www.hmv.co.jp/artist_South-Club_000000000718535/item_2nd-EP-20_8866649"
 ]
@@ -13,10 +13,10 @@ COUNTER_FILE = ".monitor_counter.txt"
 WX_APP_TOKEN = os.getenv("WX_APP_TOKEN")
 WX_UID = os.getenv("WX_UID")
 
+# 使用最稳妥的电脑端 Header，保证拿到最全的 5900+ 字网页骨架
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "X-Requested-With": "XMLHttpRequest",
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.hmv.co.jp/"
 }
 
@@ -52,46 +52,56 @@ def send_wx_notification(text):
 def check_stock(current_count):
     for url in URLS:
         try:
-            # 从传统的商品 URL 中精准提取 HMV 的唯一商品 7 位或 10 位数字 ID
-            # 例如从 ..._8866649 中提取出 8866649
-            product_id = url.split("_")[-1]
-            print(f"正在通过官方 API 接口穿透检查商品 ID: {product_id}")
+            print(f"正在精准解剖静态源码: {url}")
+            response = requests.get(url, headers=headers, timeout=15)
             
-            # 构造 HMV 官方异步无拦截库存查询端点
-            api_url = f"https://www.hmv.co.jp/multisite/action/stocks?itemIds={product_id}"
-            
-            response = requests.get(api_url, headers=headers, timeout=15)
-            
-            print(f"--- API 原始响应诊断 ---")
-            print(f"状态码: {response.status_code}")
-            raw_text = response.text.strip()
-            print(f"接口返回内容摘要: {raw_text[:200]}")
-            print(f"------------------------")
-
             if response.status_code != 200:
-                print("接口请求异常，本次跳过。")
+                print(f"网页请求失败，状态码: {response.status_code}")
                 continue
-
-            # 核心逻辑：接口如果不返回包含“断货/不能购买”的特定缺货代码，或者检测到库存数改变
-            # HMV 缺货在无拦截接口中通常表现为数量为0或特定状态码
-            is_out_of_stock = "outOfStock" in raw_text or '"stock":0' in raw_text.replace(" ", "") or "注文不可" in raw_text
             
-            # 反之，若接口正常响应，且里面明确包含了该商品ID，同时没有缺货关键字，即为有货
-            if product_id in raw_text and not is_out_of_stock:
-                msg = f"🔔【HMV补货提醒】\nAPI 接口穿透成功！您监控的商品已确切释放库存，处于可购买状态！\n\n链接：{url}"
+            if response.encoding is None or response.encoding == 'ISO-8859-1':
+                response.encoding = response.apparent_encoding
+            
+            html_content = response.text
+            soup = BeautifulSoup(html_content, 'html.parser')
+            title = soup.title.text.strip() if soup.title else "无标题"
+            print(f"抓取到的网页标题为: {title}")
+            
+            # ==========================================
+            # 🚨 终极漏洞扫描：全网页底层 HTML 核心代码分析
+            # ==========================================
+            # 特征 1：寻找页面源码中是否存在任何形式的购物车类名或图标属性（有货时全页必有）
+            has_cart_class = "cart-btn" in html_content or "icon-cart" in html_content or "btn_cart" in html_content
+            
+            # 特征 2：寻找页面源码中是否存在 HMV 特有的绝对无货/断货死锁词
+            # "販売を終了" (结束贩卖) / "お取り扱いできません" (无法处理) / "注文不可"
+            is_dead_product = "販売を終了" in html_content or "お取り扱いできません" in html_content
+            
+            print("--- 源码深度解剖诊断 ---")
+            print(f"  - 源码内是否存在购物车组件特征: {has_cart_class}")
+            print(f"  - 源码内是否存在绝对断货词拦截: {is_dead_product}")
+            print("------------------------")
+
+            # 核心匹配逻辑：只要源码中包含购物组件类，且【完全没有】绝对断货死锁词，即判定有货！
+            if has_cart_class and not is_dead_product:
+                if "HMV" not in title and "未来日記" not in title:
+                    print("警告：虽通过源码判定，但网页标题异常，跳过发送。")
+                    continue
+                    
+                msg = f"🔔【HMV补货提醒】\n静态源码漏洞判定成功！您监控的商品已确切有货！\n\n链接：{url}"
                 send_wx_notification(msg)
-                print("💥 API 状态判定有货，通知已发出！")
+                print("💥 源码精准匹配成功，有货通知已发出！")
             else:
-                print(f"检查结果：API 返回显示当前仍处于无货或锁定状态。当前累计运行次数: {current_count} 次。")
+                print(f"检查结果：源码判定当前处于断货状态。当前累计后台运行次数: {current_count} 次。")
                 
                 # 每 6 小时发送一次运行简报
                 if current_count % 36 == 0:
-                    report_msg = f"🤖【HMV监控运行简报】\nAPI 盯梢系统已持续为您守护 6 小时。\n当前累计安全运行次数：{current_count} 次。\n监控商品依旧无货，系统继续静默站岗中。"
+                    report_msg = f"🤖【HMV监控运行简报】\n系统已持续为您盯梢 6 小时。\n当前累计安全运行次数：{current_count} 次。\n商品状态：依旧处于『注文不可』，未检测到补货。系统继续监控中！"
                     print("📊 达到 6 小时周期，正在发送运行次数日志...")
                     send_wx_notification(report_msg)
                 
         except Exception as e:
-            print(f"请求商品 API 异常: {e}")
+            print(f"请求商品页面出错: {e}")
 
 if __name__ == "__main__":
     if not WX_APP_TOKEN or not WX_UID:
