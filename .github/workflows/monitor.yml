@@ -1,9 +1,7 @@
-name: HMV Stock Monitor Debug
+name: HMV Browser Simulation Monitor
 
 on:
-  # 允许手动触发运行
   workflow_dispatch:
-  # 定时任务：每 10 分钟自动运行一次
   schedule:
     - cron: '*/10 * * * *'
 
@@ -18,23 +16,19 @@ jobs:
     - name: 设置 Python 环境
       uses: actions/setup-python@v5
       with:
-        python-to-version: '3.10'
+        python-version: '3.10'
 
     - name: 安装依赖库
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4
+        pip install requests playwright
+        
+    - name: 🚨 安装和部署真实的 Chromium 浏览器
+      run: |
+        python -m playwright install chromium --with-deps
 
-    - name: 运行监控并导出网页
+    - name: 模拟真实用户运行监控
       env:
         WX_APP_TOKEN: ${{ secrets.WX_APP_TOKEN }}
         WX_UID: ${{ secrets.WX_UID }}
       run: python monitor.py
-
-    # ======= 🚨 核心：自动上传网页数据供您下载 =======
-    - name: 上传抓取的网页文件以供下载
-      if: always() # 确保即使脚本出错，也会把抓到的残存网页传上来分析
-      uses: actions/upload-artifact@v4
-      with:
-        name: hmv-debug-html
-        path: downloaded_page.html
