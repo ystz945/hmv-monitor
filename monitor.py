@@ -35,35 +35,43 @@ def check_stock():
     current_count = get_and_update_count()
     
     with sync_playwright() as p:
+        # 使用真实的大尺寸屏幕和 Agent，防止网站触发移动端简化版
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", locale="ja-JP")
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", 
+            locale="ja-JP",
+            viewport={"width": 1920, "height": 1080}
+        )
         page = context.new_page()
         
         try:
-            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
+            # 使用 networkidle 等待所有请求完成，并设置更长超时时间
+            page.goto(URL, wait_until="networkidle", timeout=60000)
             
+            # 强制页面滚动到底部再回到顶部，触发所有懒加载 JS
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(3000)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(2000)
+            
+            # 保存源码供你分析
             with open("downloaded_page.html", "w", encoding="utf-8") as f:
                 f.write(page.content())
-                
+            
+            # 获取页面渲染后的完整文本
             text = page.locator("body").inner_text()
             
-            is_sold_out = any(word in text for word in ["注文不可", "申し訳ございませんが現在ご注文いただけません", "現在オンラインでご注文いただけません"])
+            # 判定逻辑
+            is_sold_out = any(word in text for word in ["注文不可", "申し訳ございませんが現在ご注文いただけません"])
             has_cart = "カートに入れる" in text or "カートへ" in text
+            is_backorder = "お取り寄せ" in text
             
-            if not is_sold_out and has_cart:
-                send_wx_notification(f"🔔【HMV补货提醒】商品已补货！\n链接: {URL}")
-                print("💥 补货通知已推送")
+            # 最终判定：有货且不是“调货”状态才推现货提醒
+            if not is_sold_out and has_cart and not is_backorder:
+                send_wx_notification(f"🔔【HMV现货补货】商品已上架！\n链接: {URL}")
+                print("💥 现货推送已触发")
             elif current_count % 36 == 0:
-                send_wx_notification(f"🤖【监控报平安】\n系统已安全挂机 6 小时。\n运行次数: {current_count} 次。\n状态: 无货中。")
-                print("📊 6小时心跳通知已推送")
+                send_wx_notification(f"🤖【监控心跳】运行次数: {current_count}，当前无现货。")
+                print("📊 6小时心跳通知")
             else:
-                print(f"🔒 运行第 {current_count} 次：仍无货，保持静默。")
-        
-        except Exception as e:
-            print(f"监控出错: {e}")
-        finally:
-            browser.close()
-
-if __name__ == "__main__":
-    check_stock()
+                print(f"🔒 运行第 {current_count}
