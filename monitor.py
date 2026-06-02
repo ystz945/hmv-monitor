@@ -13,14 +13,15 @@ COUNTER_FILE = ".monitor_counter.txt"
 WX_APP_TOKEN = os.getenv("WX_APP_TOKEN")
 WX_UID = os.getenv("WX_UID")
 
+# 【核心改进】：改用标准的手机端端浏览器 User-Agent，迫使 HMV 返回直接包含文本的轻量版页面
 headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.hmv.co.jp/"
 }
 
 def get_and_update_count():
-    """读取并更新运行次数（通过本地文件结合 GitHub Cache 实现持久化）"""
+    """读取并更新运行次数"""
     count = 0
     if os.path.exists(COUNTER_FILE):
         try:
@@ -54,14 +55,13 @@ def send_wx_notification(text):
 def check_stock(current_count):
     for url in URLS:
         try:
-            print(f"正在检查商品: {url}")
+            print(f"正在检查商品(移动端模式): {url}")
             response = requests.get(url, headers=headers, timeout=15)
             
             if response.status_code != 200:
                 print(f"网页请求失败，状态码: {response.status_code}，本次跳过。")
                 continue
             
-            # 自动智能修正编码，防止日文解析为乱码
             if response.encoding is None or response.encoding == 'ISO-8859-1':
                 response.encoding = response.apparent_encoding
             
@@ -70,24 +70,28 @@ def check_stock(current_count):
             title = soup.title.text.strip() if soup.title else "无标题"
             print(f"抓取到的网页标题为: {title}")
             
-            # ===== 【🚨 完整版：DEBUG 诊断打印区】 =====
-            print("--- DEBUG 诊断信息开始 ---")
-            print(f"网页总字数: {len(page_text)}")
-            print("网页前 600 个字内容如下:")
-            print(page_text[:600].replace('\n', ' '))
+            # ===== 【🚨 DEBUG 诊断区】 =====
+            print("--- 移动端 DEBUG 诊断信息开始 ---")
+            print(f"手机版网页总字数: {len(page_text)}")
+            print("手机版网页前 400 个字内容:")
+            print(page_text[:400].replace('\n', ' '))
             
-            # 深入检查网页里到底包含了哪些和库存相关的日文字符
-            keywords = ["カート", "入れる", "注文", "在庫", "不可", "受付"]
-            print("关键词存在状态：")
-            for kw in keywords:
-                print(f"  - 是否包含 '{kw}': {kw in page_text}")
-            print("--- DEBUG 诊断信息结束 ---")
-            # ===================================================
+            # 看看手机版是否成功绕过了 JavaScript 限制
+            has_js_warn = "JavaScriptを有効" in page_text
+            print(f"  - 手机版是否依然提示需要JS: {has_js_warn}")
+            print(f"  - 是否包含 'カート': {"カート" in page_text}")
+            print(f"  - 是否包含 '入れる': {"入れる" in page_text}")
+            print("--- 移动端 DEBUG 诊断信息结束 ---")
+            # ===============================
             
-            # 核心判断：全网页纯文本检索是否存在“加入购物车”按钮文本
-            is_buyable_button_present = "カートに入れる" in page_text
+            # 判定一：全网页纯文本检索是否存在“加入购物车”
+            is_buyable_text = "カートに入れる" in page_text
             
-            if is_buyable_button_present:
+            # 判定二：直接在源码中寻找是否有加入购物车的表单按钮（双重保险）
+            is_btn_present = soup.find(id="js-addCart") is not None or "addcart" in response.text.lower()
+            
+            # 只要满足纯文本存在，或者找到了购物车交互特征，且没有被JS提示拦截
+            if (is_buyable_text or is_btn_present) and not has_js_warn:
                 if "HMV" not in title and "未来日記" not in title:
                     print("警告：虽匹配到关键字，但网页标题异常，跳过发送。")
                     continue
