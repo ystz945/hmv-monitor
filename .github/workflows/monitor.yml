@@ -3,13 +3,14 @@ name: HMV Browser Simulation Monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    # 巧妙错开 0,10,20 这种整点高峰期，改在尾数为 3 的分钟执行，能大幅缓解 GitHub 调度延迟
+    - cron: '3,13,23,33,43,53 * * * *'
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 必须赋予写入权限以便推送计数器
+      contents: write # 赋予写入权限以便推送计数器
 
     steps:
     - name: 检出代码
@@ -44,9 +45,11 @@ jobs:
         git commit -m "🤖 更新运行次数" || echo "无变更"
         git push
 
-    - name: 上传网页快照
+    - name: 上传网页快照与调试截图
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: hmv-debug-html
-        path: downloaded_page.html
+        name: hmv-debug-artifacts
+        path: |
+          downloaded_page.html
+          downloaded_page.png
