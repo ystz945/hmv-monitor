@@ -52,13 +52,17 @@ def check_stock():
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(2000)
             
+            # 【保留】原生 HTML 源码快照 —— 留给 AI/Gemini 深度分析 DOM 结构
             with open("downloaded_page.html", "w", encoding="utf-8") as f:
                 f.write(page.content())
+            
+            # 【新增】全页滚动截图 —— 留给用户直观排查是否遭遇 403 封锁或验证码
+            page.screenshot(path="downloaded_page.png", full_page=True)
             
             text = page.locator("body").inner_text()
             
             # 判定逻辑
-            is_sold_out = any(word in text for word in ["注文不可", "申し訳ございませんが現在ご注文いただけません"])
+            is_sold_out = any(word in text for word in ["注文不可", "申し訳ございませんが现在ご注文いただけません", "申し訳ございませんが現在ご注文いただけません"])
             has_cart = "カートに入れる" in text or "カートへ" in text
             is_backorder = "お取り寄せ" in text
             
