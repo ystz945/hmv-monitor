@@ -2,13 +2,13 @@ name: HMV Stock Monitor Cron
 
 on:
   schedule:
-    # 国际标准时间每 10 分钟自动在云端跑一次
-    - cron: '*/10 * * * *'
-  workflow_dispatch: # 允许你在网页上随时手动点击运行
+    - cron: '*/10 * * * *'  # 每 10 分钟运行一次
+  workflow_dispatch:        # 支持手动点击运行
 
 jobs:
   run-monitor:
     runs-on: ubuntu-latest
+
     steps:
     - name: 1. 检查仓库代码
       uses: actions/checkout@v4
@@ -22,7 +22,15 @@ jobs:
       run: |
         pip install requests beautifulsoup4
 
-    - name: 4. 执行监控脚本并注入安全密钥
+    - name: 4. 恢复/读取运行次数缓存
+      uses: actions/cache@v4
+      with:
+        path: .monitor_counter.txt
+        key: monitor-counter-${{ github.run_id }}-${{ github.run_number }}
+        restore-keys: |
+          monitor-counter-
+
+    - name: 5. 执行监控脚本并注入安全密钥
       env:
         WX_APP_TOKEN: ${{ secrets.WX_APP_TOKEN }}
         WX_UID: ${{ secrets.WX_UID }}
