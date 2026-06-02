@@ -13,7 +13,7 @@ COUNTER_FILE = ".monitor_counter.txt"
 WX_APP_TOKEN = os.getenv("WX_APP_TOKEN")
 WX_UID = os.getenv("WX_UID")
 
-# 【核心改进】：改用标准的手机端端浏览器 User-Agent，迫使 HMV 返回直接包含文本的轻量版页面
+# 【核心改进】：改用标准的手机端浏览器 User-Agent，迫使 HMV 返回直接包含文本的轻量版页面
 headers = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -70,17 +70,17 @@ def check_stock(current_count):
             title = soup.title.text.strip() if soup.title else "无标题"
             print(f"抓取到的网页标题为: {title}")
             
-            # ===== 【🚨 DEBUG 诊断区】 =====
+            # ===== 【🚨 修复后的 DEBUG 诊断区】 =====
             print("--- 移动端 DEBUG 诊断信息开始 ---")
             print(f"手机版网页总字数: {len(page_text)}")
             print("手机版网页前 400 个字内容:")
             print(page_text[:400].replace('\n', ' '))
             
-            # 看看手机版是否成功绕过了 JavaScript 限制
+            # 修复了此处 f-string 的单双引号嵌套错误
             has_js_warn = "JavaScriptを有効" in page_text
             print(f"  - 手机版是否依然提示需要JS: {has_js_warn}")
-            print(f"  - 是否包含 'カート': {"カート" in page_text}")
-            print(f"  - 是否包含 '入れる': {"入れる" in page_text}")
+            print(f"  - 是否包含 'カート': {'カート' in page_text}")
+            print(f"  - 是否包含 '入れる': {'入れる' in page_text}")
             print("--- 移动端 DEBUG 诊断信息结束 ---")
             # ===============================
             
