@@ -1,9 +1,9 @@
 import os
 import requests
-import json
+import re
+from bs4 import BeautifulSoup
 
 # ==================== 配置区 ====================
-# 目前放的是您用来测试的有货商品链接
 URLS = [
     "https://www.hmv.co.jp/artist_South-Club_000000000718535/item_2nd-EP-20_8866649"
 ]
@@ -15,14 +15,12 @@ WX_UID = os.getenv("WX_UID")
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "X-Requested-With": "XMLHttpRequest",
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.hmv.co.jp/",
-    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+    "Cache-Control": "no-cache"
 }
 
 def get_and_update_count():
-    """读取并更新运行次数"""
     count = 0
     if os.path.exists(COUNTER_FILE):
         try:
@@ -36,7 +34,6 @@ def get_and_update_count():
     return count
 
 def send_wx_notification(text):
-    """通过 WxPusher 推送消息到微信"""
     wx_url = "https://wxpusher.zjiecode.com/api/send/message"
     payload = {
         "appToken": WX_APP_TOKEN,
@@ -51,59 +48,57 @@ def send_wx_notification(text):
         print(f"微信推送失败: {e}")
 
 def check_stock(current_count):
-    # 使用会话 Session 自动保持和继承网页的 Cookie 状态
-    session = requests.Session()
-    
     for url in URLS:
         try:
-            product_id = url.split("_")[-1]
-            print(f"第一步：正在访问商品网页以建立会话环境: {url}")
+            print(f"正在读取商品底层静态元数据: {url}")
+            response = requests.get(url, headers=headers, timeout=15)
             
-            # 先请求一次网页，让 session 拿到基础网络凭证
-            page_res = session.get(url, headers=headers, timeout=15)
-            print(f"网页访问状态: {page_res.status_code}，已成功获取并同步浏览器会话环境。")
-            
-            # 第二步：构造内部动态库存接口（加入 cache-busting 随机数防止被机房缓存骗过）
-            api_url = f"https://www.hmv.co.jp/multisite/action/stocks?itemIds={product_id}"
-            print(f"第二步：使用同会话穿透刺探动态库存接口: {api_url}")
-            
-            api_res = session.get(api_url, headers=headers, timeout=15)
-            
-            print("==================================================")
-            print(f"🚨 【内部接口返回的原始状态流】状态码: {api_res.status_code}")
-            raw_text = api_res.text.strip()
-            print(f"内容明文: {raw_text}")
-            print("==================================================")
-            
-            if api_res.status_code != 200 or not raw_text:
-                print("核心接口未正确吐出数据，本次跳过。")
+            if response.status_code != 200:
+                print(f"网页请求失败，状态码: {response.status_code}")
                 continue
-
-            # 3. 【无货与有货的核心判定硬核标准】
-            # 在后台数据流中，只要出现以下任何一个断货词，就代表【绝对无货】
-            # 如果没有这些词，并且返回的数据里有该商品ID，则说明【绝对有货】
-            is_out_of_stock = (
-                "outOfStock" in raw_text or 
-                '"stock":0' in raw_text.replace(" ", "") or 
-                "注文不可" in raw_text or
-                "販売終了" in raw_text
-            )
             
-            if product_id in raw_text and not is_out_of_stock:
-                msg = f"🔔【HMV补货提醒】\n底层数据流穿透成功！您监控的商品已确切放出了购买通道（无断货拦截）！\n\n链接：{url}"
+            if response.encoding is None or response.encoding == 'ISO-8859-1':
+                response.encoding = response.apparent_encoding
+            
+            html_content = response.text
+            soup = BeautifulSoup(html_content, 'html.parser')
+            title = soup.title.text.strip() if soup.title else "无标题"
+            
+            # 🚨 核心逻辑：利用正则表达式从源码的 JS 变量中精准提取购物车按钮状态
+            # 匹配 "cartBtnDispFlg" : "1" 或 "cartBtnDispFlg":"1"
+            cart_flag_match = re.search(r'"cartBtnDispFlg"\s*:\s*"([^"]+)"', html_content)
+            stock_status_match = re.search(r'"stockStatus"\s*:\s*"([^"]+)"', html_content)
+            
+            cart_disp_flg = cart_flag_match.group(1) if cart_flag_match else "未找到"
+            stock_status = stock_status_match.group(1) if stock_status_match else "未找到"
+            
+            print("--- HMV 核心元数据解密面板 ---")
+            print(f"  - 网页标题: {title}")
+            print(f"  - 购物车按钮渲染状态 (cartBtnDispFlg): {cart_disp_flg}")
+            print(f"  - 底层系统库存状态码 (stockStatus): {stock_status}")
+            print("------------------------------")
+            
+            # 【终极判定标准】：
+            # 只要静态源码里的 cartBtnDispFlg 的值明确等于 "1"，说明哪怕前端还在转圈，系统也已经开放了购买通道！
+            if cart_disp_flg == "1":
+                if "HMV" not in title and "未来日記" not in title:
+                    print("警告：数据虽匹配，但网页标题异常，判定为非商品页，跳过。")
+                    continue
+                    
+                msg = f"🔔【HMV补货提醒】\n底层数据流校验成功！系统已将该商品标记为『可购买』状态！\n\n商品：{title}\n链接：{url}"
                 send_wx_notification(msg)
-                print("💥 接口扫描成功，确认有货，通知已发出！")
+                print("💥 成功锁定核心元数据！有货通知已发出！")
             else:
-                print(f"检查结果：数据流中明确检测到断货词或库存为0。当前累计运行次数: {current_count} 次。")
+                print(f"检查结果：元数据标志显示目前无法购买。当前累计运行: {current_count} 次。")
                 
                 # 每 6 小时发送一次运行简报
                 if current_count % 36 == 0:
-                    report_msg = f"🤖【HMV监控运行简报】\nAPI 穿透盯梢系统已持续为您守护 6 小时。\n当前累计安全运行次数：{current_count} 次。\n监控商品处于缺货状态，继续静默站岗中。"
+                    report_msg = f"🤖【HMV监控运行简报】\n数据层监控系统已平稳运行 6 小时。\n当前累计安全运行次数：{current_count} 次。\n状态：商品 cartBtnDispFlg={cart_disp_flg}，继续静默站岗中。"
                     print("📊 达到 6 小时周期，正在发送运行次数日志...")
                     send_wx_notification(report_msg)
                 
         except Exception as e:
-            print(f"请求商品动态数据出错: {e}")
+            print(f"请求处理出错: {e}")
 
 if __name__ == "__main__":
     if not WX_APP_TOKEN or not WX_UID:
