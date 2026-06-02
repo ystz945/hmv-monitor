@@ -13,7 +13,7 @@ COUNTER_FILE = ".monitor_counter.txt"
 WX_APP_TOKEN = os.getenv("WX_APP_TOKEN")
 WX_UID = os.getenv("WX_UID")
 
-# 【核心改进】：改用标准的手机端浏览器 User-Agent，迫使 HMV 返回直接包含文本的轻量版页面
+# 使用标准的移动端 Headers，确保能拿到纯净且未被拦截的静态 HTML 源码
 headers = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -21,7 +21,7 @@ headers = {
 }
 
 def get_and_update_count():
-    """读取并更新运行次数"""
+    """读取并更新运行次数（持久化在本地文件中）"""
     count = 0
     if os.path.exists(COUNTER_FILE):
         try:
@@ -55,7 +55,7 @@ def send_wx_notification(text):
 def check_stock(current_count):
     for url in URLS:
         try:
-            print(f"正在检查商品(移动端模式): {url}")
+            print(f"正在检查商品: {url}")
             response = requests.get(url, headers=headers, timeout=15)
             
             if response.status_code != 200:
@@ -65,42 +65,44 @@ def check_stock(current_count):
             if response.encoding is None or response.encoding == 'ISO-8859-1':
                 response.encoding = response.apparent_encoding
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            page_text = soup.text
+            html_content = response.text
+            soup = BeautifulSoup(html_content, 'html.parser')
             title = soup.title.text.strip() if soup.title else "无标题"
             print(f"抓取到的网页标题为: {title}")
             
-            # ===== 【🚨 修复后的 DEBUG 诊断区】 =====
-            print("--- 移动端 DEBUG 诊断信息开始 ---")
-            print(f"手机版网页总字数: {len(page_text)}")
-            print("手机版网页前 400 个字内容:")
-            print(page_text[:400].replace('\n', ' '))
+            # ==============================
+            # 🚨 网页源代码【精准匹配双保险】
+            # ==============================
+            # 匹配特征 1：源码中是否存在 HMV 特有的“加入购物车”核心交互函数
+            has_cart_js_func = "addcart" in html_content.lower()
             
-            # 修复了此处 f-string 的单双引号嵌套错误
-            has_js_warn = "JavaScriptを有効" in page_text
-            print(f"  - 手机版是否依然提示需要JS: {has_js_warn}")
-            print(f"  - 是否包含 'カート': {'カート' in page_text}")
-            print(f"  - 是否包含 '入れる': {'入れる' in page_text}")
-            print("--- 移动端 DEBUG 诊断信息结束 ---")
-            # ===============================
+            # 匹配特征 2：源码中是否存在专属于商品详情页的购买提交表单
+            has_detail_form = soup.find("form", attrs={"name": "itemDetailForm"}) is not None
             
-            # 判定一：全网页纯文本检索是否存在“加入购物车”
-            is_buyable_text = "カートに入れる" in page_text
-            
-            # 判定二：直接在源码中寻找是否有加入购物车的表单按钮（双重保险）
-            is_btn_present = soup.find(id="js-addCart") is not None or "addcart" in response.text.lower()
-            
-            # 只要满足纯文本存在，或者找到了购物车交互特征，且没有被JS提示拦截
-            if (is_buyable_text or is_btn_present) and not has_js_warn:
+            # 匹配特征 3：源码中是否有用于改变购物车数量或直接购买的隐藏/实体交互元素
+            has_cart_action = "cartaction" in html_content.lower() or "js-addcart" in html_content.lower()
+
+            print(f"--- 源码硬核扫描结果 ---")
+            print(f"  - 特征1 (包含addcart函数): {has_cart_js_func}")
+            print(f"  - 特征2 (存在购买详情Form表单): {has_detail_form}")
+            print(f"  - 特征3 (存在购物车Action指令): {has_cart_action}")
+            print(f"------------------------")
+
+            # 只要满足这三个底层源码核心特征的任意两个，就绝对代表当前商品“有购买通道”（即有货）
+            match_score = sum([has_cart_js_func, has_detail_form, has_cart_action])
+            is_buyable = match_score >= 2
+
+            if is_buyable:
+                # 标题安全过滤：防止误拦截正常 HMV 页面
                 if "HMV" not in title and "未来日記" not in title:
-                    print("警告：虽匹配到关键字，但网页标题异常，跳过发送。")
+                    print("警告：虽匹配到源码特征，但网页标题异常，跳过发送。")
                     continue
                     
-                msg = f"🔔【HMV补货提醒】\n您监控的商品已确切放出了「加入购物车」按钮！请速度前往抢购！\n\n链接：{url}"
+                msg = f"🔔【HMV补货提醒】\n硬核源码扫描成功！您监控的商品已确切放出了购买通道！\n\n链接：{url}"
                 send_wx_notification(msg)
-                print("💥 确认补货，通知已发出！")
+                print("💥 源码特征匹配成功，有货通知已发出！")
             else:
-                print(f"检查结果：未检测到购物车按钮。当前累计后台运行次数: {current_count} 次。")
+                print(f"检查结果：未通过源码特征匹配。当前累计后台运行次数: {current_count} 次。")
                 
                 # 每 6 小时发送一次运行简报
                 if current_count % 36 == 0:
