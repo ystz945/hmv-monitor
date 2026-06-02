@@ -20,7 +20,6 @@ headers = {
 
 def send_wx_notification(text):
     """通过 WxPusher 官方新域名推送消息到微信"""
-    # 修正为 zjiecode.com 官方标准接口地址
     wx_url = "https://wxpusher.zjiecode.com/api/send/message"
     payload = {
         "appToken": WX_APP_TOKEN,
@@ -41,25 +40,31 @@ def check_stock():
             response = requests.get(url, headers=headers, timeout=15)
             
             if response.status_code != 200:
-                print(f"网页请求失败，状态码: {response.status_code}，本次跳过以防误报。")
+                print(f"网页请求失败，状态码: {response.status_code}，本次跳过。")
                 continue
             
-            # 强制指定响应编码为 UTF-8，防止日文乱码导致匹配失效
             response.encoding = 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
             page_text = soup.text
             
-            # 研判右侧状态
-            is_order_unavailable = "注文不可" in page_text
-            is_button_disabled = "現在オンラインでご注文いただけません" in page_text
+            # 【核心逻辑升级】：改用“有货特征”来精准判定
+            # 当 HMV 补货时，右侧一定会放出红色按钮“カートに入れる” (加入购物车)
+            # 同时，原本无货的提示 “現在オンラインでご注文いただけません” 会消失
+            is_buyable_button_present = "カートに入れる" in page_text
+            is_out_of_stock_text_present = "現在オンラインでご注文いただけません" in page_text
             
-            # 逻辑调优：只有当『注文不可』和『灰色按钮提示』【同时不存在】时，才判定为补货变动
-            if not is_order_unavailable and not is_button_disabled:
-                msg = f"🔔【HMV补货提醒】\n您监控的特价商品状态已变动！可能补货了，请速度查看！\n\n链接：{url}"
+            # 安全触发阀门：只有当【发现了加入购物车按钮】或者【断货文字彻底消失】时，才发送通知
+            if is_buyable_button_present or (not is_out_of_stock_text_present and "注文不可" not in page_text):
+                # 再次过滤掉因海外 IP 被彻底拦截（如返回完全空白页或错误页）导致的误报
+                if "HMV" not in soup.title.text if soup.title else True:
+                    print("检测到异常页面（可能是IP被拦截），跳过发送以防误报。")
+                    continue
+                    
+                msg = f"🔔【HMV补货提醒】\n您监控的特价商品可能恢复库存（放出了加入购物车按钮）！请速度查看！\n\n链接：{url}"
                 send_wx_notification(msg)
-                print("💥 状态变动，通知已发出！")
+                print("💥 确认补货，通知已发出！")
             else:
-                print("检查结果：依旧处于『注文不可』且按钮为灰色。")
+                print("检查结果：依旧处于『注文不可』，未检测到购物车按钮。静默挂机中...")
                 
         except Exception as e:
             print(f"请求商品页面出错: {e}")
