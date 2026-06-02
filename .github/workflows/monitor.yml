@@ -1,37 +1,40 @@
-name: HMV Stock Monitor Cron
+name: HMV Stock Monitor Debug
 
 on:
+  # 允许手动触发运行
+  workflow_dispatch:
+  # 定时任务：每 10 分钟自动运行一次
   schedule:
-    - cron: '*/10 * * * *'  # 每 10 分钟运行一次
-  workflow_dispatch:        # 支持手动点击运行
+    - cron: '*/10 * * * *'
 
 jobs:
-  run-monitor:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 1. 检查仓库代码
+    - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 2. 初始化 Python 环境
+    - name: 设置 Python 环境
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-to-version: '3.10'
 
-    - name: 3. 安装爬虫依赖库
+    - name: 安装依赖库
       run: |
+        python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    - name: 4. 恢复/读取运行次数缓存
-      uses: actions/cache@v4
-      with:
-        path: .monitor_counter.txt
-        key: monitor-counter-${{ github.run_id }}-${{ github.run_number }}
-        restore-keys: |
-          monitor-counter-
-
-    - name: 5. 执行监控脚本并注入安全密钥
+    - name: 运行监控并导出网页
       env:
         WX_APP_TOKEN: ${{ secrets.WX_APP_TOKEN }}
         WX_UID: ${{ secrets.WX_UID }}
       run: python monitor.py
+
+    # ======= 🚨 核心：自动上传网页数据供您下载 =======
+    - name: 上传抓取的网页文件以供下载
+      if: always() # 确保即使脚本出错，也会把抓到的残存网页传上来分析
+      uses: actions/upload-artifact@v4
+      with:
+        name: hmv-debug-html
+        path: downloaded_page.html
