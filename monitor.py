@@ -40,26 +40,22 @@ def check_stock():
         page = context.new_page()
         
         try:
-            page.goto(URL, wait_until="networkidle", timeout=45000)
-            page.wait_for_timeout(3000)
+            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
             
-            # 必须在逻辑结束前写入文件，否则 Artifacts 找不到文件
             with open("downloaded_page.html", "w", encoding="utf-8") as f:
                 f.write(page.content())
                 
             text = page.locator("body").inner_text()
             
-            # 判定逻辑
             is_sold_out = any(word in text for word in ["注文不可", "申し訳ございませんが現在ご注文いただけません", "現在オンラインでご注文いただけません"])
             has_cart = "カートに入れる" in text or "カートへ" in text
             
-            # 补货提醒
             if not is_sold_out and has_cart:
-                send_wx_notification(f"🔔【HMV补货提醒】商品已补货，请立即前往抢购！\n链接: {URL}")
+                send_wx_notification(f"🔔【HMV补货提醒】商品已补货！\n链接: {URL}")
                 print("💥 补货通知已推送")
-            # 6小时简报
             elif current_count % 36 == 0:
-                send_wx_notification(f"🤖【监控运行简报】系统已连续运行 6 小时。\n当前运行次数: {current_count} 次。\n状态: 商品仍无货，监控中。")
+                send_wx_notification(f"🤖【监控报平安】\n系统已安全挂机 6 小时。\n运行次数: {current_count} 次。\n状态: 无货中。")
                 print("📊 6小时心跳通知已推送")
             else:
                 print(f"🔒 运行第 {current_count} 次：仍无货，保持静默。")
