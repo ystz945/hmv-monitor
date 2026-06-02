@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 
 # ==================== 配置区 ====================
 URLS = [
-    "https://www.hmv.co.jp/artist_%E3%82%A2%E3%83%8B%E3%83%A1_000000000013179/item_%E6%9C%AA%E6%9D%A5%E6%97%A5%E8%A8%98-Blu-ray-%E9%99%90%E5%AE%9A%E7%89%88-%E7%AC%AC9%E5%B7%BB_4215832"
+    "https://www.hmv.co.jp/artist_South-Club_000000000718535/item_2nd-EP-20_8866649"
 ]
 COUNTER_FILE = ".monitor_counter.txt"
 # ================================================
