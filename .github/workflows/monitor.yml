@@ -1,16 +1,13 @@
 name: HMV Browser Simulation Monitor
 
 on:
-  workflow_dispatch:
-  schedule:
-    # 巧妙错开 0,10,20 这种整点高峰期，改在尾数为 3 的分钟执行，能大幅缓解 GitHub 调度延迟
-    - cron: '3,13,23,33,43,53 * * * *'
+  workflow_dispatch: # 保持开启，供 Cron-Job.org 的 API 随时精准触发
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 赋予写入权限以便推送计数器
+      contents: write # 必须赋予写入权限以便推送计数器
 
     steps:
     - name: 检出代码
